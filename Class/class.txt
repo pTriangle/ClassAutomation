@@ -1,0 +1,466 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace BHF.io
+{
+    class BottingClass
+    {
+        public class KeyboardHotkeys
+        {
+
+            public class KeyboardHook : IDisposable
+            {
+                // Registers a hot key with Windows.
+                [DllImport("user32.dll")]
+                private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+                // Unregisters the hot key with Windows.
+                [DllImport("user32.dll")]
+                private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+                /// <summary>
+                /// Represents the window that is used internally to get the messages.
+                /// </summary>
+                private class Window : NativeWindow, IDisposable
+                {
+                    private static int WM_HOTKEY = 0x0312;
+
+                    public Window()
+                    {
+                        // create the handle for the window.
+                        this.CreateHandle(new CreateParams());
+                    }
+
+                    /// <summary>
+                    /// Overridden to get the notifications.
+                    /// </summary>
+                    /// <param name="m"></param>
+                    protected override void WndProc(ref Message m)
+                    {
+                        base.WndProc(ref m);
+
+                        // check if we got a hot key pressed.
+                        if (m.Msg == WM_HOTKEY)
+                        {
+                            // get the keys.
+                            Keys key = (Keys)(((int)m.LParam >> 16) & 0xFFFF);
+                            ModifierKeys modifier = (ModifierKeys)((int)m.LParam & 0xFFFF);
+
+                            // invoke the event to notify the parent.
+                            if (KeyPressed != null)
+                                KeyPressed(this, new KeyPressedEventArgs(modifier, key));
+                        }
+                    }
+
+                    public event EventHandler<KeyPressedEventArgs> KeyPressed;
+
+                    #region IDisposable Members
+
+                    public void Dispose()
+                    {
+                        this.DestroyHandle();
+                    }
+
+                    #endregion
+                }
+
+                private Window _window = new Window();
+                private int _currentId;
+
+                public KeyboardHook()
+                {
+                    // register the event of the inner native window.
+                    _window.KeyPressed += delegate(object sender, KeyPressedEventArgs args)
+                    {
+                        if (KeyPressed != null)
+                            KeyPressed(this, args);
+                    };
+                }
+
+                /// <summary>
+                /// Registers a hot key in the system.
+                /// </summary>
+                /// <param name="modifier">The modifiers that are associated with the hot key.</param>
+                /// <param name="key">The key itself that is associated with the hot key.</param>
+                public void RegisterHotKey(ModifierKeys modifier, Keys key)
+                {
+                    // increment the counter.
+                    _currentId = _currentId + 1;
+
+                    // register the hot key.
+                    if (!RegisterHotKey(_window.Handle, _currentId, (uint)modifier, (uint)key))
+                        throw new InvalidOperationException("Couldn’t register the hot key.");
+                }
+
+                /// <summary>
+                /// A hot key has been pressed.
+                /// </summary>
+                public event EventHandler<KeyPressedEventArgs> KeyPressed;
+
+                #region IDisposable Members
+
+                public void Dispose()
+                {
+                    // unregister all the registered hot keys.
+                    for (int i = _currentId; i > 0; i--)
+                    {
+                        UnregisterHotKey(_window.Handle, i);
+                    }
+
+                    // dispose the inner native window.
+                    _window.Dispose();
+                }
+
+                #endregion
+
+
+                public class KeyPressedEventArgs : EventArgs
+                {
+                    private ModifierKeys _modifier;
+                    private Keys _key;
+
+                    internal KeyPressedEventArgs(ModifierKeys modifier, Keys key)
+                    {
+                        _modifier = modifier;
+                        _key = key;
+                    }
+
+                    public ModifierKeys Modifier
+                    {
+                        get { return _modifier; }
+                    }
+
+                    public Keys Key
+                    {
+                        get { return _key; }
+                    }
+                }
+
+                /// <summary>
+                /// The enumeration of possible modifiers.
+                /// </summary>
+                [Flags]
+                public enum ModifierKeys : uint
+                {
+                    Alt = 1,
+                    Control = 2,
+                    Shift = 4,
+                    Win = 8
+                }
+
+            }
+
+        }
+        public class MouseController
+        {
+            [DllImport("user32.dll", SetLastError = true)]
+            static extern uint SendInput(uint nInputs, ref INPUT pInputs, int cbSize);
+
+            [DllImport("user32.dll")]
+            static extern int GetSystemMetrics(SystemMetric smIndex);
+
+            [StructLayout(LayoutKind.Sequential)]
+            struct INPUT
+            {
+                public SendInputEventType type;
+                public MouseKeybdhardwareInputUnion mkhi;
+            }
+            [StructLayout(LayoutKind.Explicit)]
+            struct MouseKeybdhardwareInputUnion
+            {
+                [FieldOffset(0)]
+                public MouseInputData mi;
+
+                [FieldOffset(0)]
+                public KEYBDINPUT ki;
+
+                [FieldOffset(0)]
+                public HARDWAREINPUT hi;
+            }
+            [StructLayout(LayoutKind.Sequential)]
+            struct KEYBDINPUT
+            {
+                public ushort wVk;
+                public ushort wScan;
+                public uint dwFlags;
+                public uint time;
+                public IntPtr dwExtraInfo;
+            }
+            [StructLayout(LayoutKind.Sequential)]
+            struct HARDWAREINPUT
+            {
+                public int uMsg;
+                public short wParamL;
+                public short wParamH;
+            }
+            struct MouseInputData
+            {
+                public int dx;
+                public int dy;
+                public uint mouseData;
+                public MouseEventFlags dwFlags;
+                public uint time;
+                public IntPtr dwExtraInfo;
+            }
+            [Flags]
+            enum MouseEventFlags : uint
+            {
+                MOUSEEVENTF_MOVE = 0x0001,
+                MOUSEEVENTF_LEFTDOWN = 0x0002,
+                MOUSEEVENTF_LEFTUP = 0x0004,
+                MOUSEEVENTF_RIGHTDOWN = 0x0008,
+                MOUSEEVENTF_RIGHTUP = 0x0010,
+                MOUSEEVENTF_MIDDLEDOWN = 0x0020,
+                MOUSEEVENTF_MIDDLEUP = 0x0040,
+                MOUSEEVENTF_XDOWN = 0x0080,
+                MOUSEEVENTF_XUP = 0x0100,
+                MOUSEEVENTF_WHEEL = 0x0800,
+                MOUSEEVENTF_VIRTUALDESK = 0x4000,
+                MOUSEEVENTF_ABSOLUTE = 0x8000
+            }
+            enum SendInputEventType : int
+            {
+                InputMouse,
+                InputKeyboard,
+                InputHardware
+            }
+
+            enum SystemMetric
+            {
+                SM_CXSCREEN = 0,
+                SM_CYSCREEN = 1,
+            }
+
+            static int CalculateAbsoluteCoordinateX(int x)
+            {
+                return (x * 65536) / GetSystemMetrics(SystemMetric.SM_CXSCREEN);
+            }
+
+            static int CalculateAbsoluteCoordinateY(int y)
+            {
+                return (y * 65536) / GetSystemMetrics(SystemMetric.SM_CYSCREEN);
+            }
+
+            public static void ClickLeftMouseButton(int x, int y)
+            {
+                INPUT mouseInput = new INPUT();
+                mouseInput.type = SendInputEventType.InputMouse;
+                mouseInput.mkhi.mi.dx = CalculateAbsoluteCoordinateX(x);
+                mouseInput.mkhi.mi.dy = CalculateAbsoluteCoordinateY(y);
+                mouseInput.mkhi.mi.mouseData = 0;
+
+
+                mouseInput.mkhi.mi.dwFlags = MouseEventFlags.MOUSEEVENTF_MOVE | MouseEventFlags.MOUSEEVENTF_ABSOLUTE;
+                SendInput(1, ref mouseInput, Marshal.SizeOf(new INPUT()));
+
+
+                mouseInput.mkhi.mi.dwFlags = MouseEventFlags.MOUSEEVENTF_LEFTDOWN;
+                SendInput(1, ref mouseInput, Marshal.SizeOf(new INPUT()));
+
+                mouseInput.mkhi.mi.dwFlags = MouseEventFlags.MOUSEEVENTF_LEFTUP;
+                SendInput(1, ref mouseInput, Marshal.SizeOf(new INPUT()));
+
+
+            }
+
+            public static void ClickRightMouseButton(int x, int y)
+            {
+                INPUT mouseInput = new INPUT();
+                mouseInput.type = SendInputEventType.InputMouse;
+                mouseInput.mkhi.mi.dx = CalculateAbsoluteCoordinateX(x);
+                mouseInput.mkhi.mi.dy = CalculateAbsoluteCoordinateY(y);
+                mouseInput.mkhi.mi.mouseData = 0;
+
+
+                mouseInput.mkhi.mi.dwFlags = MouseEventFlags.MOUSEEVENTF_MOVE | MouseEventFlags.MOUSEEVENTF_ABSOLUTE;
+                SendInput(1, ref mouseInput, Marshal.SizeOf(new INPUT()));
+
+                mouseInput.mkhi.mi.dwFlags = MouseEventFlags.MOUSEEVENTF_RIGHTDOWN;
+                SendInput(1, ref mouseInput, Marshal.SizeOf(new INPUT()));
+
+                mouseInput.mkhi.mi.dwFlags = MouseEventFlags.MOUSEEVENTF_RIGHTUP;
+                SendInput(1, ref mouseInput, Marshal.SizeOf(new INPUT()));
+            }
+        }
+        public class ScreenReader
+        {
+            [DllImport("user32.dll")]
+            static extern IntPtr GetDC(IntPtr hwnd);
+
+            [DllImport("user32.dll")]
+            static extern Int32 ReleaseDC(IntPtr hwnd, IntPtr hdc);
+
+            [DllImport("gdi32.dll")]
+            static extern uint GetPixel(IntPtr hdc, int nXPos, int nYPos);
+
+            static public Color GetPixelColor(int x, int y)
+            {
+                IntPtr hdc = GetDC(IntPtr.Zero);
+                uint pixel = GetPixel(hdc, x, y);
+                ReleaseDC(IntPtr.Zero, hdc);
+                Color _c = Color.FromArgb((int)(pixel & 0x000000FF),
+                             (int)(pixel & 0x0000FF00) >> 8,
+                             (int)(pixel & 0x00FF0000) >> 16);
+                return _c;
+            }
+
+        }
+        public class WindowController
+        {
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, SetWindowPosFlags uFlags);
+
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            static extern bool GetWindowRect(System.IntPtr hWnd, out RECT lpRect);
+
+            static public string GetWindowLocation(IntPtr pHandle)
+            {
+                try
+                {
+                    WINDOWPLACEMENT placement = new WINDOWPLACEMENT();
+                    placement.length = Marshal.SizeOf(placement);
+                    GetWindowPlacement(pHandle, ref placement);
+                    string _currLocation = placement.rcNormalPosition.X.ToString() + "," + placement.rcNormalPosition.Y.ToString();
+
+                    return _currLocation;
+                }
+                catch
+                {
+                    return "n/a";
+                }
+
+                   
+               
+            }
+            public void ManipulateWindow(IntPtr processHandle, IntPtr hWndInsertAfter, int WindowLocationX, int WindowLocationY, int WindowSizeX, int WindowSizeY, SetWindowPosFlags uflags)
+            {
+                try
+                {
+                    SetWindowPos(processHandle, new IntPtr(0), WindowLocationX, WindowLocationY, WindowSizeX, WindowSizeY, SetWindowPosFlags.SWP_SHOWWINDOW);
+                }
+                catch
+                {
+                    Console.WriteLine("Could not change windowposition/resize window by Handle: " + processHandle);
+                }
+               
+
+            }
+            static public string GetWindowResolution(IntPtr pHandle)
+            {
+
+                try
+                {
+                    RECT rct;
+                    Rectangle myRect = new Rectangle();
+
+                    GetWindowRect(pHandle, out rct);
+
+                    myRect.Width = rct.Right - rct.Left + 1;
+                    myRect.Height = rct.Bottom - rct.Top + 1;
+                    return myRect.Width.ToString() + "x" + myRect.Height.ToString();
+                }
+                catch
+                {
+                    return "n/a";
+                }
+               
+            }
+               
+           
+
+           
+
+            #region setwindowpos enums
+            public enum SpecialWindowHandles
+            {
+                HWND_TOP = 0,
+                HWND_BOTTOM = 1,
+                HWND_TOPMOST = -1,
+                HWND_NOTOPMOST = -2
+            }
+
+            [Flags]
+            public enum SetWindowPosFlags : uint
+            {
+                SWP_ASYNCWINDOWPOS = 0x4000,
+
+                SWP_DEFERERASE = 0x2000,
+
+                SWP_DRAWFRAME = 0x0020,
+
+                SWP_FRAMECHANGED = 0x0020,
+
+                SWP_HIDEWINDOW = 0x0080,
+
+                SWP_NOACTIVATE = 0x0010,
+
+                SWP_NOCOPYBITS = 0x0100,
+
+                SWP_NOMOVE = 0x0002,
+
+                SWP_NOOWNERZORDER = 0x0200,
+
+                SWP_NOREDRAW = 0x0008,
+
+                SWP_NOREPOSITION = 0x0200,
+
+                SWP_NOSENDCHANGING = 0x0400,
+
+                SWP_NOSIZE = 0x0001,
+
+                SWP_NOZORDER = 0x0004,
+
+                SWP_SHOWWINDOW = 0x0040,
+            }
+            #endregion
+
+            #region getwindowrect enums
+            private struct WINDOWPLACEMENT
+            {
+                public int length;
+                public int flags;
+                public int showCmd;
+                public System.Drawing.Point ptMinPosition;
+                public System.Drawing.Point ptMaxPosition;
+                public System.Drawing.Rectangle rcNormalPosition;
+            }
+
+            const UInt32 SW_HIDE = 0;
+            const UInt32 SW_SHOWNORMAL = 1;
+            const UInt32 SW_NORMAL = 1;
+            const UInt32 SW_SHOWMINIMIZED = 2;
+            const UInt32 SW_SHOWMAXIMIZED = 3;
+            const UInt32 SW_MAXIMIZE = 3;
+            const UInt32 SW_SHOWNOACTIVATE = 4;
+            const UInt32 SW_SHOW = 5;
+            const UInt32 SW_MINIMIZE = 6;
+            const UInt32 SW_SHOWMINNOACTIVE = 7;
+            const UInt32 SW_SHOWNA = 8;
+            const UInt32 SW_RESTORE = 9;
+
+
+            [StructLayout(LayoutKind.Sequential)]
+            public struct RECT
+            {
+                public int Left;        // x position of upper-left corner
+                public int Top;         // y position of upper-left corner
+                public int Right;       // x position of lower-right corner
+                public int Bottom;      // y position of lower-right corner
+            }
+
+            #endregion
+        }
+    }
+}
